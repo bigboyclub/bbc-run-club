@@ -109,6 +109,7 @@ const state = {
   timerHandle:        null,
   wakeLock:           null,
   // Segment player
+  activeSegments:     [],
   currentSegmentIdx:  0,
   segTimeRemaining:   0,
   segTimerHandle:     null,
@@ -244,8 +245,34 @@ function router() {
 function navigate(path) {
   stopTimer();
   stopSegmentTimer();
+  removeSwipeRight();
   releaseWakeLock();
   window.location.hash = path || '';
+}
+
+// ============================================================
+// SWIPE RIGHT — additional input for both players
+// ============================================================
+function initSwipeRight(handler) {
+  removeSwipeRight();
+  let startX = 0, startY = 0;
+  function onStart(e) { startX = e.touches[0].clientX; startY = e.touches[0].clientY; }
+  function onEnd(e) {
+    const dx = e.changedTouches[0].clientX - startX;
+    const dy = e.changedTouches[0].clientY - startY;
+    if (dx > 60 && Math.abs(dx) > Math.abs(dy)) handler();
+  }
+  document.addEventListener('touchstart', onStart, { passive: true });
+  document.addEventListener('touchend',   onEnd,   { passive: true });
+  document._swipeStartFn = onStart;
+  document._swipeEndFn   = onEnd;
+}
+
+function removeSwipeRight() {
+  if (document._swipeStartFn) document.removeEventListener('touchstart', document._swipeStartFn);
+  if (document._swipeEndFn)   document.removeEventListener('touchend',   document._swipeEndFn);
+  document._swipeStartFn = null;
+  document._swipeEndFn   = null;
 }
 
 // ============================================================
@@ -525,13 +552,24 @@ function renderCoachingScreen(runId) {
 // ============================================================
 // SEGMENT PLAYER
 // ============================================================
+function getSegmentsByRunStrongTier(runId) {
+  const all = state.intervals[runId] || [];
+  const hasTierCol = all.some(iv => iv.tier && iv.tier.trim() !== '');
+  if (!hasTierCol) return [...all];
+  const intervalsTier = RS_TIER_INTERVALS_KEY[state.runStrongTier] || state.runStrongTier;
+  return all
+    .filter(iv => iv.tier.trim() === intervalsTier)
+    .sort((a, b) => parseInt(a.order) - parseInt(b.order));
+}
+
 function startSegmentPlayer() {
   const runId   = state.currentRunId;
   const run     = state.runs.find(r => r.id === runId);
-  const segments = state.intervals[runId];
+  const segments = getSegmentsByRunStrongTier(runId);
 
-  if (!run || !segments || !segments.length) { navigate(''); return; }
+  if (!run || !segments.length) { navigate(''); return; }
 
+  state.activeSegments    = segments;
   state.currentSegmentIdx = 0;
   state.segTimeRemaining  = 0;
   state.segTotalTime      = 0;
@@ -539,31 +577,84 @@ function startSegmentPlayer() {
   state.runStartTime      = Date.now();
   stopSegmentTimer();
 
-  renderSegmentPlayerShell(run, segments);
+  renderSegmentPlayerShell(run);
   tryLockOrientation();
 }
 
-function renderSegmentPlayerShell(run, segments) {
-  const idx    = state.currentSegmentIdx;
-  const seg    = segments[idx];
-  const nextSeg = segments[idx + 1];
-  const pct    = (idx / segments.length) * 100;
-  const isTimer = seg.segment_type === 'timer';
+function renderSegmentPlayerShell(run) {
+  const segments = state.activeSegments;
+  const idx      = state.currentSegmentIdx;
+  const seg      = segments[idx];
+  const nextSeg  = segments[idx + 1] || null;
+  const total    = segments.length;
+  const topPct   = (idx / total) * 100;
+  const ringPct  = Math.round((idx / total) * 100);
+  const ringOffset = (CIRCUMFERENCE * (1 - idx / total)).toFixed(2);
+  const isTimer  = seg.segment_type === 'timer';
+
+  const distLabel = (seg.distance_label || '').trim();
+  const notes     = (seg.notes || '').trim();
+  const nextText  = nextSeg ? `Next up: ${nextSeg.label}` : 'Final segment 💪';
+
+  let ringHTML;
+  if (isTimer) {
+    const dur = parseInt(seg.duration_seconds) || 0;
+    ringHTML = `
+      <div class="timer-container seg-ring-area" style="pointer-events:none;">
+        <svg class="timer-svg" viewBox="0 0 280 280" xmlns="http://www.w3.org/2000/svg">
+          <circle class="timer-track" cx="140" cy="140" r="120"/>
+          <circle class="timer-progress" cx="140" cy="140" r="120" id="segTimerProgress"
+            stroke-dasharray="${CIRCUMFERENCE.toFixed(2)}"
+            stroke-dashoffset="0"
+            transform="scale(-1 1) translate(-280 0) rotate(-90 140 140)"
+          />
+        </svg>
+        <div class="timer-text">
+          <div class="timer-countdown" id="segTimerCountdown">${formatTime(dur)}</div>
+        </div>
+      </div>
+    `;
+  } else {
+    ringHTML = `
+      <div class="timer-container seg-ring-area" style="pointer-events:none;">
+        <svg class="timer-svg" viewBox="0 0 280 280" xmlns="http://www.w3.org/2000/svg">
+          <circle class="timer-track" cx="140" cy="140" r="120"/>
+          <circle class="timer-progress" cx="140" cy="140" r="120"
+            stroke-dasharray="${CIRCUMFERENCE.toFixed(2)}"
+            stroke-dashoffset="${ringOffset}"
+            transform="rotate(-90 140 140)"
+          />
+        </svg>
+        <div class="timer-text">
+          <div class="seg-ring-pct">${ringPct}%</div>
+        </div>
+      </div>
+    `;
+  }
 
   document.getElementById('app').innerHTML = `
     <div class="view-segment-player">
       <div class="player-progress-bar">
-        <div class="player-progress-fill" id="segProgressFill" style="width:${pct}%"></div>
+        <div class="player-progress-fill" style="width:${topPct}%"></div>
       </div>
       <header class="player-header">
         <button class="close-btn" onclick="navigate('')">×</button>
         <h1 class="player-run-title">${run.title}</h1>
         <div class="header-spacer"></div>
       </header>
-      <div class="segment-counter">Segment ${idx + 1} of ${segments.length}</div>
-      ${renderSegCardHTML(seg, nextSeg)}
+      <div class="segment-counter">Segment ${idx + 1} of ${total}</div>
+      <div class="seg-content">
+        ${ringHTML}
+        ${distLabel ? `<div class="seg-distance-primary">${distLabel}</div>` : ''}
+        <h2 class="seg-label">${seg.label}</h2>
+        ${notes ? `<p class="seg-coaching-note">${notes}</p>` : ''}
+      </div>
       <div class="seg-controls">
-        ${isTimer ? `<button class="pause-btn" id="segPauseBtn" onclick="toggleSegPause()" aria-label="Pause">${pauseIcon()}</button>` : ''}
+        ${isTimer
+          ? `<button class="pause-btn" id="segPauseBtn" onclick="toggleSegPause()" aria-label="Pause">${pauseIcon()}</button>`
+          : `<button class="seg-next-btn" onclick="advanceSegment()">Next →</button>`
+        }
+        <div class="seg-next-up">${nextText}</div>
         <button class="skip-btn" onclick="advanceSegment()">Skip →</button>
       </div>
     </div>
@@ -582,52 +673,7 @@ function renderSegmentPlayerShell(run, segments) {
     }
     state.segTimerHandle = setInterval(segTick, 1000);
   }
-}
-
-function renderSegCardHTML(seg, nextSeg) {
-  const distLabel = (seg.distance_label || '').trim();
-  const notes     = (seg.notes || '').trim();
-  const nextLabel = nextSeg ? nextSeg.label : null;
-  const nextText  = nextLabel ? `Next up: ${nextLabel}` : 'Final segment 💪';
-
-  if (seg.segment_type === 'timer') {
-    const dur = parseInt(seg.duration_seconds) || 0;
-    const displayDist = distLabel || formatTime(dur);
-    return `
-      <div class="seg-card seg-card-timer">
-        <div class="seg-top">
-          <h2 class="seg-label">${seg.label}</h2>
-          <div class="seg-distance">${displayDist}</div>
-          ${notes ? `<p class="seg-notes">${notes}</p>` : ''}
-        </div>
-        <div class="timer-container" style="pointer-events:none;">
-          <svg class="timer-svg" viewBox="0 0 280 280" xmlns="http://www.w3.org/2000/svg">
-            <circle class="timer-track" cx="140" cy="140" r="120"/>
-            <circle class="timer-progress" cx="140" cy="140" r="120" id="segTimerProgress"
-              stroke-dasharray="${CIRCUMFERENCE.toFixed(2)}"
-              stroke-dashoffset="0"
-              transform="scale(-1 1) translate(-280 0) rotate(-90 140 140)"
-            />
-          </svg>
-          <div class="timer-text">
-            <div class="timer-countdown" id="segTimerCountdown">${formatTime(dur)}</div>
-          </div>
-        </div>
-        <div class="seg-next-up">${nextText}</div>
-      </div>
-    `;
-  }
-
-  // Tap segment
-  return `
-    <div class="seg-card seg-card-tap">
-      <h2 class="seg-label">${seg.label}</h2>
-      ${distLabel ? `<div class="seg-distance">${distLabel}</div>` : ''}
-      ${notes ? `<p class="seg-notes">${notes}</p>` : ''}
-      <button class="seg-done-btn" onclick="advanceSegment()">Done — Next →</button>
-      <div class="seg-next-up">${nextText}</div>
-    </div>
-  `;
+  initSwipeRight(advanceSegment);
 }
 
 function segTick() {
@@ -649,7 +695,8 @@ function segTick() {
 }
 
 function updateSegTimerArc() {
-  const seg = state.intervals[state.currentRunId][state.currentSegmentIdx];
+  const seg = state.activeSegments[state.currentSegmentIdx];
+  if (!seg) return;
   const dur = parseInt(seg.duration_seconds) || 1;
   const offset = CIRCUMFERENCE * (1 - state.segTimeRemaining / dur);
   const tp = document.getElementById('segTimerProgress');
@@ -663,19 +710,16 @@ function toggleSegPause() {
 }
 
 function advanceSegment() {
-  const runId    = state.currentRunId;
-  const run      = state.runs.find(r => r.id === runId);
-  const segments = state.intervals[runId];
-
+  const run = state.runs.find(r => r.id === state.currentRunId);
   stopSegmentTimer();
 
-  if (state.currentSegmentIdx >= segments.length - 1) {
+  if (state.currentSegmentIdx >= state.activeSegments.length - 1) {
     showSegmentCompletion();
     return;
   }
 
   state.currentSegmentIdx++;
-  renderSegmentPlayerShell(run, segments);
+  renderSegmentPlayerShell(run);
 }
 
 function stopSegmentTimer() {
@@ -765,6 +809,7 @@ function renderPlayer(runId) {
 
   requestWakeLock();
   tryLockOrientation();
+  initSwipeRight(skipInterval);
 }
 
 function handleTimerTap() {
@@ -890,6 +935,7 @@ function stopTimer() {
 // COMPLETION
 // ============================================================
 function showCompletion() {
+  removeSwipeRight();
   releaseWakeLock();
   const run       = state.runs.find(r => r.id === state.currentRunId);
   const intervals = state.activeIntervals;
@@ -912,9 +958,10 @@ function showCompletion() {
 }
 
 function showSegmentCompletion() {
+  removeSwipeRight();
   releaseWakeLock();
   const run      = state.runs.find(r => r.id === state.currentRunId);
-  const segments = state.intervals[state.currentRunId];
+  const segments = state.activeSegments;
 
   let totalDist = 0;
   let hasMiDistance = false;
