@@ -316,7 +316,7 @@ button {
   flex-direction: column;
   overflow: hidden;
   position: relative;
-  touch-action: none;
+  touch-action: pan-y;
 }
 
 /* PROGRESS BAR */
@@ -1083,6 +1083,7 @@ button {
   flex-direction: column;
   overflow: hidden;
   position: relative;
+  touch-action: pan-y;
 }
 
 .segment-counter {

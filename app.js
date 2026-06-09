@@ -259,25 +259,34 @@ function initSwipeLeft(handler) {
   removeSwipeLeft();
   let startX = 0, startY = 0;
   function onStart(e) { startX = e.touches[0].clientX; startY = e.touches[0].clientY; }
+  function onMove(e) {
+    const dx = e.touches[0].clientX - startX;
+    const dy = e.touches[0].clientY - startY;
+    if (Math.abs(dx) > Math.abs(dy)) e.preventDefault();
+  }
   function onEnd(e) {
     if (_swipeAnimating) return;
     const dx = e.changedTouches[0].clientX - startX;
     const dy = e.changedTouches[0].clientY - startY;
-    if (dx < -60 && Math.abs(dx) > Math.abs(dy)) {
+    if (dx < -40 && Math.abs(dx) > Math.abs(dy)) {
       _swipeAnimating = true;
       animateSwipeLeft(handler, () => { _swipeAnimating = false; });
     }
   }
   document.addEventListener('touchstart', onStart, { passive: true });
+  document.addEventListener('touchmove',  onMove,  { passive: false });
   document.addEventListener('touchend',   onEnd,   { passive: true });
   document._swipeStartFn = onStart;
+  document._swipeMoveFn  = onMove;
   document._swipeEndFn   = onEnd;
 }
 
 function removeSwipeLeft() {
   if (document._swipeStartFn) document.removeEventListener('touchstart', document._swipeStartFn);
+  if (document._swipeMoveFn)  document.removeEventListener('touchmove',  document._swipeMoveFn);
   if (document._swipeEndFn)   document.removeEventListener('touchend',   document._swipeEndFn);
   document._swipeStartFn = null;
+  document._swipeMoveFn  = null;
   document._swipeEndFn   = null;
   _swipeAnimating = false;
 }
