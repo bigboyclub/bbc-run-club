@@ -245,7 +245,7 @@ function router() {
 function navigate(path) {
   stopTimer();
   stopSegmentTimer();
-  removeSwipeRight();
+  removeSwipeLeft();
   releaseWakeLock();
   window.location.hash = path || '';
 }
@@ -253,14 +253,20 @@ function navigate(path) {
 // ============================================================
 // SWIPE RIGHT — additional input for both players
 // ============================================================
-function initSwipeRight(handler) {
-  removeSwipeRight();
+let _swipeAnimating = false;
+
+function initSwipeLeft(handler) {
+  removeSwipeLeft();
   let startX = 0, startY = 0;
   function onStart(e) { startX = e.touches[0].clientX; startY = e.touches[0].clientY; }
   function onEnd(e) {
+    if (_swipeAnimating) return;
     const dx = e.changedTouches[0].clientX - startX;
     const dy = e.changedTouches[0].clientY - startY;
-    if (dx > 60 && Math.abs(dx) > Math.abs(dy)) handler();
+    if (dx < -60 && Math.abs(dx) > Math.abs(dy)) {
+      _swipeAnimating = true;
+      animateSwipeLeft(handler, () => { _swipeAnimating = false; });
+    }
   }
   document.addEventListener('touchstart', onStart, { passive: true });
   document.addEventListener('touchend',   onEnd,   { passive: true });
@@ -268,11 +274,36 @@ function initSwipeRight(handler) {
   document._swipeEndFn   = onEnd;
 }
 
-function removeSwipeRight() {
+function removeSwipeLeft() {
   if (document._swipeStartFn) document.removeEventListener('touchstart', document._swipeStartFn);
   if (document._swipeEndFn)   document.removeEventListener('touchend',   document._swipeEndFn);
   document._swipeStartFn = null;
   document._swipeEndFn   = null;
+  _swipeAnimating = false;
+}
+
+function animateSwipeLeft(handler, done) {
+  const app  = document.getElementById('app');
+  const view = app.firstElementChild;
+  if (!view) { handler(); done(); return; }
+
+  view.style.transition = 'transform 250ms ease-in-out';
+  view.style.transform  = 'translateX(-100%)';
+
+  setTimeout(() => {
+    handler();
+    const newView = document.getElementById('app').firstElementChild;
+    if (newView) {
+      newView.style.transition = 'none';
+      newView.style.transform  = 'translateX(100%)';
+      void newView.getBoundingClientRect();
+      newView.style.transition = 'transform 250ms ease-in-out';
+      newView.style.transform  = 'translateX(0)';
+      setTimeout(done, 250);
+    } else {
+      done();
+    }
+  }, 250);
 }
 
 // ============================================================
@@ -673,7 +704,7 @@ function renderSegmentPlayerShell(run) {
     }
     state.segTimerHandle = setInterval(segTick, 1000);
   }
-  initSwipeRight(advanceSegment);
+  initSwipeLeft(advanceSegment);
 }
 
 function segTick() {
@@ -809,7 +840,7 @@ function renderPlayer(runId) {
 
   requestWakeLock();
   tryLockOrientation();
-  initSwipeRight(skipInterval);
+  initSwipeLeft(skipInterval);
 }
 
 function handleTimerTap() {
@@ -935,7 +966,7 @@ function stopTimer() {
 // COMPLETION
 // ============================================================
 function showCompletion() {
-  removeSwipeRight();
+  removeSwipeLeft();
   releaseWakeLock();
   const run       = state.runs.find(r => r.id === state.currentRunId);
   const intervals = state.activeIntervals;
@@ -958,7 +989,7 @@ function showCompletion() {
 }
 
 function showSegmentCompletion() {
-  removeSwipeRight();
+  removeSwipeLeft();
   releaseWakeLock();
   const run      = state.runs.find(r => r.id === state.currentRunId);
   const segments = state.activeSegments;
