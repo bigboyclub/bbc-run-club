@@ -695,6 +695,7 @@ function renderSegmentPlayerShell(run) {
           : `<button class="seg-next-btn" onclick="advanceSegment()">Next →</button>`
         }
         <div class="seg-next-up">${nextText}</div>
+        ${idx > 0 ? `<button class="skip-btn" onclick="goBackSegment()">‹ Back</button>` : ''}
         <button class="skip-btn" onclick="advanceSegment()">Skip →</button>
       </div>
     </div>
@@ -759,6 +760,14 @@ function advanceSegment() {
   }
 
   state.currentSegmentIdx++;
+  renderSegmentPlayerShell(run);
+}
+
+function goBackSegment() {
+  if (state.currentSegmentIdx === 0) return;
+  const run = state.runs.find(r => r.id === state.currentRunId);
+  stopSegmentTimer();
+  state.currentSegmentIdx--;
   renderSegmentPlayerShell(run);
 }
 
@@ -842,6 +851,7 @@ function renderPlayer(runId) {
           <div class="next-up-label">Next Up</div>
           <div class="next-up-content" id="nextUpContent">${nextUpText(next)}</div>
         </div>
+        <button class="skip-btn" id="backIntervalBtn" onclick="goBackInterval()" style="display:none">‹ Back</button>
         <button class="skip-btn" onclick="skipInterval()">Skip →</button>
       </div>
     </div>
@@ -961,6 +971,44 @@ function advanceInterval() {
   if (nextUp) nextUp.textContent = nextUpText(intervals[state.currentIntervalIdx + 1]);
 
   updateProgressBar();
+
+  const backBtn = document.getElementById('backIntervalBtn');
+  if (backBtn) backBtn.style.display = '';
+}
+
+function goBackInterval() {
+  if (state.currentIntervalIdx === 0) return;
+  const intervals = state.activeIntervals;
+
+  stopTimer();
+  state.currentIntervalIdx--;
+  const interval = intervals[state.currentIntervalIdx];
+  state.timeRemaining = parseInt(interval.duration_seconds) || 60;
+  state.isRunning = true;
+
+  const tp = document.getElementById('timerProgress');
+  if (tp) {
+    tp.style.transition = 'none';
+    tp.style.strokeDashoffset = '0';
+    void tp.getBoundingClientRect();
+    tp.style.transition = 'stroke-dashoffset 0.98s linear';
+  }
+
+  const cd = document.getElementById('timerCountdown');
+  if (cd) cd.textContent = formatTime(state.timeRemaining);
+
+  const label = document.getElementById('intervalLabel');
+  if (label) label.textContent = formatIntervalLabel(interval);
+
+  const nextUp = document.getElementById('nextUpContent');
+  if (nextUp) nextUp.textContent = nextUpText(intervals[state.currentIntervalIdx + 1]);
+
+  updateProgressBar();
+
+  const backBtn = document.getElementById('backIntervalBtn');
+  if (backBtn) backBtn.style.display = state.currentIntervalIdx === 0 ? 'none' : '';
+
+  state.timerHandle = setInterval(tick, 1000);
 }
 
 function stopTimer() {
